@@ -27,7 +27,7 @@ KERNEL_AUFS_BRANCH=aufs3.11
 BUSYBOX_VERSION=1.21.1
 MAVEN_VERSION=3.1.1
 JDK_VERSION=1.7.0_45
-JDK_PACKAGE_VERSION=7u45
+JDK_PACKAGE_VERSION=8u5
 RUBY_VERSION=2.0.0-p247
 
 # Kernel
@@ -101,7 +101,7 @@ $(CHROOT)/opt/jdk: $(OUT)/$(JDK_PACKAGE_FILE)
 
 $(CHROOT)/etc/profile.d/jdk.sh: $(CHROOT_BASE_TIMESTAMP_FILE)
 	mkdir -p $(CHROOT)/etc/profile.d
-	echo "export JAVA_HOME=/opt/jdk" > $@
+	echo "export JAVA_HOME=/opt/jdk1.8.0_05" > $@
 	echo "export PATH=\$$JAVA_HOME/bin:\$$PATH" >> $@
 
 $(OUT)/$(JDK_PACKAGE_FILE):
