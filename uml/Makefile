@@ -138,11 +138,11 @@ rubygems: $(RUBYGEMS_TIMESTAMP_FILE)
 $(RUBYGEMS_TIMESTAMP_FILE): $(CHROOT)/usr/bin/ruby
 	cp -f /etc/resolv.conf $(CHROOT)/etc/resolv.conf
 	chroot $(CHROOT) sh -c "env HOME=/root gem update --system --force"
-	chroot $(CHROOT) sh -c "env HOME=/root gem install rspec bundler --force --no-ri --no-rdoc"
+	chroot $(CHROOT) sh -c "env HOME=/root gem install diffy rspec bundler  --force --no-ri --no-rdoc"
 	rm -Rf $(CHROOT)/usr/lib/ruby/gems/*/cache
 	rm -f $(CHROOT)/etc/resolv.conf  # tmc-init will create one in the real sandbox
 	touch $(RUBYGEMS_TIMESTAMP_FILE)
-	
+
 
 $(CHROOT)/usr/bin/ruby: $(OUT)/ruby-$(RUBY_VERSION).tar.bz2 $(CHROOT_BASE_TIMESTAMP_FILE)
 	rm -Rf $(CHROOT)/root/ruby-$(RUBY_VERSION)
