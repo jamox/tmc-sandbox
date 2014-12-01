@@ -15,6 +15,9 @@ require 'misc_utils'
 require 'signal_handlers'
 require 'sandbox_instance'
 require 'lock_file'
+require 'digest/sha1'
+require 'fileutils'
+require 'json'
 
 class SandboxApp
   class Plugin
@@ -22,11 +25,11 @@ class SandboxApp
       @settings = settings
       @plugin_settings = settings['plugins'][plugin_name]
     end
-    
+
     def plugin_name
       ActiveSupport::Inflector.underscore(self.class.to_s)
     end
-    
+
     attr_reader :settings
 
     #
@@ -62,11 +65,11 @@ class SandboxApp
       raise "Not implemeted"
     end
   end
-  
+
   class PluginManager
     def initialize(settings)
       @settings = settings
-      
+
       @plugins = []
       if @settings['plugins'].is_a?(Hash)
         plugin_names = @settings['plugins'].keys.sort # arbitrary but predictable load order
@@ -95,7 +98,7 @@ class SandboxApp
         nil
       end
     end
-    
+
     def run_hook(hook, *args)
       rets = []
       for plugin in @plugins
@@ -118,13 +121,13 @@ class SandboxApp
       end
     end
   end
-  
+
   class Notifier
     def initialize(url, token)
       @url = url
       @token = token
     end
-    
+
     def send_notification(status, exit_code, output)
       postdata = output.merge({
         'token' => @token,
@@ -151,13 +154,18 @@ class SandboxApp
     set_up_signal_handlers
 
     @plugin_manager = PluginManager.new(@settings)
+    val =  ENV['FAKE_SANDBOX'] && !ENV['FEED_CACHE_RESULTS']
+    AppLog.info("Starting up #{val} ")
 
-    @instances = []
-    @settings['max_instances'].times do |i|
-      @instances << SandboxInstance.new(i, @settings, @plugin_manager)
+    unless ENV['FAKE_SANDBOX'] && !ENV['FEED_CACHE_RESULTS']
+      AppLog.info("Creating sandbox instances")
+      @instances = []
+      @settings['max_instances'].times do |i|
+        @instances << SandboxInstance.new(i, @settings, @plugin_manager)
+      end
     end
   end
-  
+
   attr_reader :settings, :plugin_manager
 
   def call(env)
@@ -234,19 +242,55 @@ private
       end
     end
   end
-  
+
+  def write_cache(hash, status,exit_code, output)
+    FileUtils.mkdir_p 'cache' unless Dir.exist? 'cache'
+    json = {hash: hash, status: status, exit_code: exit_code, output: output}.to_json
+    File.write(File.join('cache', hash), json)
+  end
+
+  def read_from_cache(hash)
+    # status, exit_code, output
+    file = File.read(File.join('cahce', hash))
+    json = JSON.parse file
+    return [json['status'], json['exit_code'], json['output']]
+  end
+
   def serve_post_task
-    inst = @instances.find(&:idle?)
-    if inst
-      raise BadRequest.new('missing file parameter') if !@req['file'] || !@req['file'][:tempfile]
+    if ENV['FAKE_SANDBOX']
+      AppLog.info("Using fake sandbox")
+      AppLog.info("FILE = #{@req['file']}")
+
+      contents = File.read @req['file'][:tempfile]
+      hash = Digest::SHA1.hexdigest "#{contents}"
+
       notifier = if @req['notify'] then Notifier.new(@req['notify'], @req['token']) else nil end
-      inst.start(@req['file'][:tempfile].path) do |status, exit_code, output|
+      if ENV['FEED_CACHE_RESULTS']
+        AppLog.info("Storing to cahce")
+        inst = @instances.find(&:idle?)
+        inst.start(@req['file'][:tempfile].path) do |status, exit_code, output|
+          write_cache(hash, status,exit_code, output)
+          notifier.send_notification(status, exit_code, output) if notifier
+        end
+      else
+        AppLog.info("Reading from cache")
+        status, exit_code, output = read_from_cache(hash)
         notifier.send_notification(status, exit_code, output) if notifier
       end
-      @respdata[:status] = 'ok'
     else
-      @resp.status = 500
-      @respdata[:status] = 'busy'
+      AppLog.info("using normal instance #{ENV.inspect}")
+      inst = @instances.find(&:idle?)
+      if inst
+        raise BadRequest.new('missing file parameter') if !@req['file'] || !@req['file'][:tempfile]
+        notifier = if @req['notify'] then Notifier.new(@req['notify'], @req['token']) else nil end
+        inst.start(@req['file'][:tempfile].path) do |status, exit_code, output|
+          notifier.send_notification(status, exit_code, output) if notifier
+        end
+        @respdata[:status] = 'ok'
+      else
+        @resp.status = 500
+        @respdata[:status] = 'busy'
+      end
     end
   end
 
@@ -257,7 +301,7 @@ private
     @respdata[:total_instances] = total
     @respdata[:loadavg] = File.read("/proc/loadavg").split(' ')[0..2] if File.exist?("/proc/loadavg")
   end
-  
+
   def init_check
     raise 'kernel not compiled' unless File.exist? Paths.kernel_path
     raise 'rootfs not prepared' unless File.exist? Paths.rootfs_path

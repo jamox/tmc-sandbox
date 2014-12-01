@@ -93,6 +93,10 @@ private
         '--pid',
         webapp_pid_file
       ]
+      AppLog.info "ENVL #{ENV.inspect}"
+      env = {}
+      env['FEED_CACHE_RESULTS'] = '1' if ENV['RUBY_FEED_CACHE_RESULTS']
+      env['FAKE_SANDBOX'] = '1' if ENV['RUBY_FAKE_SANDBOX']
 
       # We don't use --daemonize since it closes stdout and stderr.
       # Instead we'll daemonize manually.
@@ -100,7 +104,7 @@ private
       Process.setsid
       exit! if Process.fork
 
-      Process.exec(Shellwords.join(cmd.map(&:to_s)))
+      Process.exec(env, Shellwords.join(cmd.map(&:to_s)))
     end
     Process.waitpid(start_pid)
 
